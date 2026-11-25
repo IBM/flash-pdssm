@@ -67,16 +67,3 @@ y = layer(x)  # x: (batch, length, 256)
   year    = {2026}
 }
 ```
-
-## Tuning and profiling
-
-Two run-time knobs (no rebuild needed):
-
-- `PDSSM_TILE_L=<n>`: time-tile length of the two-phase scan (default 256, the compile-time
-  `PDSSM_TILE_L`). Each tile is scanned sequentially by one block, so shorter tiles mean more
-  parallel blocks and a shorter serial chain (about 2*tile + L/tile steps).
-- `PDSSM_GRAD_IMPL=triton|torch`: dictionary / selector gradients from the Triton kernels
-  (default; dictionary gradient in TF32) or from dense PyTorch (exact fp32).
-
-`python benchmarks/bench_scan.py` checks every variant against `reference_scan` and times the
-forward, the reverse scan and both gradients at flame's training shapes (100M to 3B).
