@@ -1,78 +1,82 @@
-<!-- This should be the location of the title of the repository, normally the short name -->
-# repo-template
+# Flash PD-SSM
 
-<!-- Build Status, is a great thing to have at the top of your repository, it shows that you take your CI/CD as first class citizens -->
-<!-- [![Build Status](https://travis-ci.org/jjasghar/ibm-cloud-cli.svg?branch=master)](https://travis-ci.org/jjasghar/ibm-cloud-cli) -->
+PyTorch layer and CUDA kernel for **Flash PD-SSM** ([Terzić et al., 2026](https://arxiv.org/abs/2605.19150)). Flash PD-SSM maintains a trainable set of structured sparse matrices, a single one of which is discretely selected at each time-step, enabling FSA expressiveness at the level of unstructured matrices.
 
-<!-- Not always needed, but a scope helps the user understand in a short sentance like below, why this repo exists -->
-## Scope
+<p align="center"><img src="assets/flash_pdssm.svg" width="860" alt="Flash PD-SSM matrix generator"></p>
 
-The purpose of this project is to provide a template for new open source repositories.
+## Model
 
-<!-- A more detailed Usage or detailed explaination of the repository here -->
-## Usage
+The transition matrix is $`A(u_t) = P(u_t)\,D(u_t)`$. The sparse matrices are generated from a dictionary of $`K`$ dense matrices $`M_k`$ by selecting the largest element in each column, and a single one of them is selected at each time-step:
 
-This repository contains some example best practices for open source repositories:
-
-* [LICENSE](LICENSE)
-* [README.md](README.md)
-* [CONTRIBUTING.md](CONTRIBUTING.md)
-* [MAINTAINERS.md](MAINTAINERS.md)
-* [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
-<!-- A Changelog allows you to track major changes and things that happen, https://github.com/github-changelog-generator/github-changelog-generator can help automate the process -->
-* [CHANGELOG.md](CHANGELOG.md)
-
-> These are optional
-
-<!-- The following are OPTIONAL, but strongly suggested to have in your repository. -->
-* [dco.yml](.github/dco.yml) - This enables DCO bot for you, please take a look https://github.com/probot/dco for more details.
-* [travis.yml](.travis.yml) - This is a example `.travis.yml`, please take a look https://docs.travis-ci.com/user/tutorial/ for more details.
-
-These may be copied into a new or existing project to make it easier for developers not on a project team to collaborate.
-
-<!-- A notes section is useful for anything that isn't covered in the Usage or Scope. Like what we have below. -->
-## Notes
-
-**NOTE: While this boilerplate project uses the Apache 2.0 license, when
-establishing a new repo using this template, please use the
-license that was approved for your project.**
-
-**NOTE: This repository has been configured with the [DCO bot](https://github.com/probot/dco).
-When you set up a new repository that uses the Apache license, you should
-use the DCO to manage contributions. The DCO bot will help enforce that.
-Please contact one of the IBM GH Org stewards.**
-
-<!-- Questions can be useful but optional, this gives you a place to say, "This is how to contact this project maintainers or create PRs -->
-If you have any questions or issues you can create a new [issue here][issues].
-
-Pull requests are very welcome! Make sure your patches are well tested.
-Ideally create a topic branch for every separate change you make. For
-example:
-
-1. Fork the repo
-2. Create your feature branch (`git checkout -b my-new-feature`)
-3. Commit your changes (`git commit -am 'Added some feature'`)
-4. Push to the branch (`git push origin my-new-feature`)
-5. Create new Pull Request
-
-## License
-
-All source files must include a Copyright and License header. The SPDX license header is 
-preferred because it can be easily scanned.
-
-If you would like to see the detailed LICENSE click [here](LICENSE).
-
-```text
-#
-# Copyright IBM Corp. {Year project was created} - {Current Year}
-# SPDX-License-Identifier: Apache-2.0
-#
+```math
+M_k^{\text{sparse}}[j] = \arg\max_i M_k[i,j], \qquad
+k(u_t) = S u_t, \qquad
+k^*(u_t) = \arg\max_k\, k(u_t)_k, \qquad
+P(u_t) = M^{\text{sparse}}_{k^*(u_t)}, \qquad
+D(u_t) = \sigma(W_D u_t).
 ```
-## Authors
 
-Optionally, you may include a list of authors, though this is redundant with the built-in
-GitHub list of contributors.
+**Forward pass.** With $`P_t := P(u_t)`$ and $`D_t := D(u_t)`$,
 
-- Author: New OpenSource IBMer <new-opensource-ibmer@ibm.com>
+```math
+x_t = P_t D_t\, x_{t-1} + b_t,
+```
 
-[issues]: https://github.com/IBM/repo-template/issues/new
+computed by a three-phase chunkwise parallel scan (local aggregation, global carry, carry correction) in $`O(LN)`$ time and memory.
+
+**Backward pass.** A reverse scan yields $`\lambda_t = \partial \ell / \partial x_t`$, from which $`\partial \ell / \partial b_t = \lambda_t`$ and $`\partial \ell / \partial D_t = (P_t^\top \lambda_t) \odot x_{t-1}`$. Both argmaxes are approximated by straight-through estimation, reusing the discretely selected $`P_t`$:
+
+```math
+\frac{\partial \ell}{\partial M_k} \approx \sum_{t:\, k^*(u_t)=k} \lambda_t (D_t x_{t-1})^\top \, \frac{\partial\, \mathrm{softmax}(M_k)}{\partial M_k},
+\qquad
+\frac{\partial \ell}{\partial k(u_t)} \approx \big[\lambda_t^\top P_k D_t x_{t-1}\big]_{k=1}^{K} \, \frac{\partial\, \mathrm{softmax}(k(u_t))}{\partial k(u_t)},
+```
+
+with the softmax taken over the rows of $`M_k`$ and over $`k`$, respectively.
+
+## Install
+
+Needs PyTorch and a CUDA toolkit (`nvcc`) of the same major version as PyTorch's CUDA. Build on a GPU node.
+
+```bash
+git clone <this repo> pdssm && cd pdssm
+pip install --no-build-isolation -e .
+python tests/test_pdssm.py
+```
+
+- Set `TORCH_CUDA_ARCH_LIST` to your GPU (e.g. `9.0` for H100/H200) if the build picks the wrong architecture.
+- CUDA 12.x needs `gcc` ≤ 13.
+- Without a GPU: `PDSSM_SKIP_CUDA_BUILD=1 pip install --no-build-isolation -e .` (slow PyTorch scan).
+
+## Use
+
+```python
+from pdssm import FlashPDSSM
+
+layer = FlashPDSSM(embed_size=256, state_size=16, num_heads=4, dict_size=6).cuda()
+y = layer(x)  # x: (batch, length, 256)
+```
+
+## Citation
+
+```bibtex
+@article{terzic2026flashpdssm,
+  title   = {Flash PD-SSM: Memory-Optimized Structured Sparse State-Space Models},
+  author  = {Terzi{\'c}, Aleksandar and Carzaniga, Francesco and Menet, Nicolas and Biehl, Yannick and Hersche, Michael and Hofmann, Thomas and Rahimi, Abbas},
+  journal = {arXiv preprint arXiv:2605.19150},
+  year    = {2026}
+}
+```
+
+## Tuning and profiling
+
+Two run-time knobs (no rebuild needed):
+
+- `PDSSM_TILE_L=<n>`: time-tile length of the two-phase scan (default 256, the compile-time
+  `PDSSM_TILE_L`). Each tile is scanned sequentially by one block, so shorter tiles mean more
+  parallel blocks and a shorter serial chain (about 2*tile + L/tile steps).
+- `PDSSM_GRAD_IMPL=triton|torch`: dictionary / selector gradients from the Triton kernels
+  (default; dictionary gradient in TF32) or from dense PyTorch (exact fp32).
+
+`python benchmarks/bench_scan.py` checks every variant against `reference_scan` and times the
+forward, the reverse scan and both gradients at flame's training shapes (100M to 3B).
