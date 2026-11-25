@@ -56,14 +56,17 @@ from pdssm import FlashPDSSM
 layer = FlashPDSSM(embed_size=256, state_size=16, num_heads=4, dict_size=6).cuda()
 y = layer(x)  # x: (batch, length, 256)
 ```
-
 ## Citation
 
+If you use this code, please cite our NeurIPS 2026 paper (\* equal contribution):
+
 ```bibtex
-@article{terzic2026flashpdssm,
-  title   = {Flash PD-SSM: Memory-Optimized Structured Sparse State-Space Models},
-  author  = {Terzi{\'c}, Aleksandar and Carzaniga, Francesco and Menet, Nicolas and Biehl, Yannick and Hersche, Michael and Hofmann, Thomas and Rahimi, Abbas},
-  journal = {arXiv preprint arXiv:2605.19150},
-  year    = {2026}
+@inproceedings{terzic2026flashpdssm,
+  title     = {Flash PD-SSM: Memory-Optimized Structured Sparse State-Space Models},
+  author    = {Terzi{\'c}, Aleksandar and Carzaniga, Francesco and Menet, Nicolas and Biehl, Yannick and Hersche, Michael and Hofmann, Thomas and Rahimi, Abbas},
+  booktitle = {Advances in Neural Information Processing Systems},
+  volume    = {39},
+  year      = {2026},
+  note      = {Aleksandar Terzi{\'c} and Francesco Carzaniga contributed equally}
 }
 ```
